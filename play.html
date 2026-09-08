@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>播放音频</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    .box {
+      width: min(420px, 92vw);
+      text-align: center;
+    }
+    audio { width: 100%; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>点击播放</h1>
+    <p>部分手机不会自动出声，点一下即可。</p>
+    <audio controls autoplay src="hello.mp3"></audio>
+  </div>
+</body>
+</html>
