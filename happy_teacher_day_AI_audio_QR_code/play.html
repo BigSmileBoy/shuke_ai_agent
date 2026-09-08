@@ -209,46 +209,157 @@
         return true;
       }
 
-      function readDuration() {
-        if (shown) return;
-        var duration = audio.duration;
+      // Parse MP3 bytes directly so WeChat can show duration without tapping play.
+      function durationFromMp3(arrayBuffer) {
+        var data = new Uint8Array(arrayBuffer);
+        var offset = 0;
 
-        // Some mobile browsers report Infinity until a seek forces metadata decode.
-        if (duration === Infinity || (isNaN(duration) && audio.seekable && audio.seekable.length)) {
-          try {
-            audio.currentTime = 1e101;
-            audio.addEventListener(
-              "timeupdate",
-              function onTimeUpdate() {
-                audio.removeEventListener("timeupdate", onTimeUpdate);
-                var real = audio.duration;
-                audio.currentTime = 0;
-                showDuration(real);
-              },
-              { once: true }
-            );
-            return;
-          } catch (e) {}
+        if (data.length >= 10 && data[0] === 0x49 && data[1] === 0x44 && data[2] === 0x33) {
+          var tagSize =
+            ((data[6] & 0x7f) << 21) |
+            ((data[7] & 0x7f) << 14) |
+            ((data[8] & 0x7f) << 7) |
+            (data[9] & 0x7f);
+          offset = 10 + tagSize;
+          if (data[5] & 0x10) offset += 10;
         }
 
-        showDuration(duration);
+        var bitrateTable = [
+          [0, 0, 0, 0, 0],
+          [32, 32, 32, 32, 8],
+          [64, 48, 40, 48, 16],
+          [96, 56, 48, 56, 24],
+          [128, 64, 56, 64, 32],
+          [160, 80, 64, 80, 40],
+          [192, 96, 80, 96, 48],
+          [224, 112, 96, 112, 56],
+          [256, 128, 112, 128, 64],
+          [288, 160, 128, 144, 80],
+          [320, 192, 160, 160, 96],
+          [352, 224, 192, 176, 112],
+          [384, 256, 224, 192, 128],
+          [416, 320, 256, 224, 144],
+          [448, 384, 320, 256, 160],
+          [0, 0, 0, 0, 0]
+        ];
+        var sampleRateTable = [
+          [11025, 12000, 8000],
+          [0, 0, 0],
+          [22050, 24000, 16000],
+          [44100, 48000, 32000]
+        ];
+
+        var totalSamples = 0;
+        var sampleRate = 0;
+        var frames = 0;
+        var guard = 0;
+
+        while (offset < data.length - 4 && guard < 200000) {
+          guard += 1;
+          if (!(data[offset] === 0xff && (data[offset + 1] & 0xe0) === 0xe0)) {
+            offset += 1;
+            continue;
+          }
+
+          var b1 = data[offset + 1];
+          var b2 = data[offset + 2];
+          var versionBits = (b1 >> 3) & 0x3;
+          var layerBits = (b1 >> 1) & 0x3;
+          var bitrateIndex = (b2 >> 4) & 0xf;
+          var sampleRateIndex = (b2 >> 2) & 0x3;
+          var padding = (b2 >> 1) & 0x1;
+
+          if (versionBits === 1 || layerBits === 0 || bitrateIndex === 0 || bitrateIndex === 15 || sampleRateIndex === 3) {
+            offset += 1;
+            continue;
+          }
+
+          var col;
+          if (versionBits === 3) {
+            // MPEG1: Layer1 / Layer2 / Layer3
+            col = layerBits === 3 ? 0 : layerBits === 2 ? 1 : 2;
+          } else {
+            // MPEG2 / MPEG2.5: Layer1|2 share one column, Layer3 another
+            col = layerBits === 1 ? 4 : 3;
+          }
+
+          var bitrate = bitrateTable[bitrateIndex][col] * 1000;
+          sampleRate = sampleRateTable[versionBits][sampleRateIndex];
+          if (!bitrate || !sampleRate) {
+            offset += 1;
+            continue;
+          }
+
+          var samplesPerFrame = layerBits === 3 ? 384 : layerBits === 2 ? 1152 : versionBits === 3 ? 1152 : 576;
+          var frameLength;
+          if (layerBits === 3) {
+            frameLength = Math.floor((12 * bitrate) / sampleRate + padding) * 4;
+          } else {
+            var coeff = versionBits === 3 ? 144 : 72;
+            frameLength = Math.floor((coeff * bitrate) / sampleRate) + padding;
+          }
+
+          if (frameLength < 1) {
+            offset += 1;
+            continue;
+          }
+
+          // Xing/Info VBR header on first audio frame.
+          if (frames === 0) {
+            var channelMode = (data[offset + 3] >> 6) & 0x3;
+            var xingOffset =
+              offset +
+              4 +
+              (versionBits === 3 ? (channelMode === 3 ? 17 : 32) : channelMode === 3 ? 9 : 17);
+            var tag =
+              String.fromCharCode(data[xingOffset], data[xingOffset + 1], data[xingOffset + 2], data[xingOffset + 3]);
+            if (tag === "Xing" || tag === "Info") {
+              var flags =
+                (data[xingOffset + 4] << 24) |
+                (data[xingOffset + 5] << 16) |
+                (data[xingOffset + 6] << 8) |
+                data[xingOffset + 7];
+              if (flags & 0x1) {
+                var frameCount =
+                  (data[xingOffset + 8] << 24) |
+                  (data[xingOffset + 9] << 16) |
+                  (data[xingOffset + 10] << 8) |
+                  data[xingOffset + 11];
+                return (frameCount * samplesPerFrame) / sampleRate;
+              }
+            }
+          }
+
+          totalSamples += samplesPerFrame;
+          frames += 1;
+          offset += frameLength;
+        }
+
+        if (!frames || !sampleRate) return 0;
+        return totalSamples / sampleRate;
       }
 
-      audio.addEventListener("loadedmetadata", readDuration);
-      audio.addEventListener("durationchange", readDuration);
-      audio.addEventListener("canplay", readDuration);
+      function attachAudio(arrayBuffer) {
+        var blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
+        var objectUrl = URL.createObjectURL(blob);
+        audio.src = objectUrl;
+        audio.load();
+      }
 
       fetch("hello.mp3")
         .then(function (res) {
           if (!res.ok) throw new Error("fetch failed");
-          return res.blob();
+          return res.arrayBuffer();
         })
-        .then(function (blob) {
-          var objectUrl = URL.createObjectURL(blob);
-          audio.src = objectUrl;
-          audio.load();
+        .then(function (buffer) {
+          var parsed = durationFromMp3(buffer);
+          if (!showDuration(parsed)) {
+            label.textContent = "未知";
+          }
+          attachAudio(buffer);
         })
         .catch(function () {
+          label.textContent = "未知";
           audio.load();
         });
     })();
