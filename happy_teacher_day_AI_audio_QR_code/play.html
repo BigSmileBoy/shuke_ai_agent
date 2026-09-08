@@ -81,10 +81,17 @@
     }
 
     .player-title {
-      margin: 0 0 12px;
+      margin: 0 0 8px;
       font-size: 1.05rem;
       font-weight: 700;
       letter-spacing: 0.02em;
+      text-align: center;
+    }
+
+    .player-meta {
+      margin: 0 0 12px;
+      font-size: 0.9rem;
+      color: rgba(74, 52, 40, 0.72);
       text-align: center;
     }
 
@@ -172,14 +179,79 @@
 
     <section class="player" aria-label="祝福音频">
       <h1 class="player-title">来自洪梓昱的教师节祝福</h1>
+      <p class="player-meta">时长 <span id="duration-label">读取中…</span></p>
       <audio
+        id="blessing-audio"
         controls
-        autoplay
         playsinline
-        preload="auto"
+        preload="metadata"
         src="hello.mp3"
       ></audio>
     </section>
   </main>
+  <script>
+    (function () {
+      var audio = document.getElementById("blessing-audio");
+      var label = document.getElementById("duration-label");
+      var shown = false;
+
+      function formatTime(sec) {
+        var total = Math.max(0, Math.round(sec));
+        var m = Math.floor(total / 60);
+        var s = total % 60;
+        return m + ":" + String(s).padStart(2, "0");
+      }
+
+      function showDuration(sec) {
+        if (!isFinite(sec) || sec <= 0) return false;
+        label.textContent = formatTime(sec);
+        shown = true;
+        return true;
+      }
+
+      function readDuration() {
+        if (shown) return;
+        var duration = audio.duration;
+
+        // Some mobile browsers report Infinity until a seek forces metadata decode.
+        if (duration === Infinity || (isNaN(duration) && audio.seekable && audio.seekable.length)) {
+          try {
+            audio.currentTime = 1e101;
+            audio.addEventListener(
+              "timeupdate",
+              function onTimeUpdate() {
+                audio.removeEventListener("timeupdate", onTimeUpdate);
+                var real = audio.duration;
+                audio.currentTime = 0;
+                showDuration(real);
+              },
+              { once: true }
+            );
+            return;
+          } catch (e) {}
+        }
+
+        showDuration(duration);
+      }
+
+      audio.addEventListener("loadedmetadata", readDuration);
+      audio.addEventListener("durationchange", readDuration);
+      audio.addEventListener("canplay", readDuration);
+
+      fetch("hello.mp3")
+        .then(function (res) {
+          if (!res.ok) throw new Error("fetch failed");
+          return res.blob();
+        })
+        .then(function (blob) {
+          var objectUrl = URL.createObjectURL(blob);
+          audio.src = objectUrl;
+          audio.load();
+        })
+        .catch(function () {
+          audio.load();
+        });
+    })();
+  </script>
 </body>
 </html>
