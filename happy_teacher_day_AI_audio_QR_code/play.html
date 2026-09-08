@@ -81,25 +81,90 @@
     }
 
     .player-title {
-      margin: 0 0 8px;
+      margin: 0 0 14px;
       font-size: 1.05rem;
       font-weight: 700;
       letter-spacing: 0.02em;
       text-align: center;
     }
 
-    .player-meta {
-      margin: 0 0 12px;
-      font-size: 0.9rem;
-      color: rgba(74, 52, 40, 0.72);
-      text-align: center;
+    .player-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
-    audio {
-      width: 100%;
-      height: 40px;
-      border-radius: 999px;
+    .play-btn {
+      flex: 0 0 auto;
+      width: 42px;
+      height: 42px;
+      border: 0;
+      border-radius: 50%;
+      background: var(--coral);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      box-shadow: 0 6px 14px rgba(232, 107, 74, 0.35);
     }
+
+    .play-btn svg {
+      width: 18px;
+      height: 18px;
+      display: block;
+    }
+
+    .play-btn .icon-pause { display: none; }
+    .play-btn.is-playing .icon-play { display: none; }
+    .play-btn.is-playing .icon-pause { display: block; }
+
+    .timeline {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .time-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 0.82rem;
+      color: rgba(74, 52, 40, 0.72);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .seek {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(74, 52, 40, 0.15);
+      outline: none;
+    }
+
+    .seek::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--coral);
+      border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+    }
+
+    .seek::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--coral);
+      border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+    }
+
+    audio { display: none; }
 
     .glow {
       position: fixed;
@@ -179,37 +244,109 @@
 
     <section class="player" aria-label="祝福音频">
       <h1 class="player-title">来自洪梓昱的教师节祝福</h1>
-      <p class="player-meta">时长 <span id="duration-label">读取中…</span></p>
+      <div class="player-bar">
+        <button class="play-btn" id="play-btn" type="button" aria-label="播放">
+          <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M8 5v14l11-7z"></path>
+          </svg>
+          <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M6 5h4v14H6zm8 0h4v14h-4z"></path>
+          </svg>
+        </button>
+        <div class="timeline">
+          <div class="time-row">
+            <span id="current-label">0:00</span>
+            <span id="duration-label">0:19</span>
+          </div>
+          <input
+            class="seek"
+            id="seek"
+            type="range"
+            min="0"
+            max="1000"
+            value="0"
+            step="1"
+            aria-label="播放进度"
+          >
+        </div>
+      </div>
       <audio
         id="blessing-audio"
-        controls
         playsinline
-        preload="metadata"
+        preload="auto"
         src="hello.mp3"
+        data-duration="19.08"
       ></audio>
     </section>
   </main>
   <script>
     (function () {
       var audio = document.getElementById("blessing-audio");
-      var label = document.getElementById("duration-label");
-      var shown = false;
+      var playBtn = document.getElementById("play-btn");
+      var seek = document.getElementById("seek");
+      var currentLabel = document.getElementById("current-label");
+      var durationLabel = document.getElementById("duration-label");
+      var durationSec = 0;
+      var seeking = false;
 
       function formatTime(sec) {
-        var total = Math.max(0, Math.round(sec));
+        var total = Math.max(0, Math.round(Number(sec) || 0));
         var m = Math.floor(total / 60);
         var s = total % 60;
         return m + ":" + String(s).padStart(2, "0");
       }
 
-      function showDuration(sec) {
+      function setDuration(sec) {
+        sec = Number(sec);
         if (!isFinite(sec) || sec <= 0) return false;
-        label.textContent = formatTime(sec);
-        shown = true;
+        // Prefer a newly detected longer/finite duration; ignore tiny noise.
+        if (durationSec > 0 && Math.abs(durationSec - sec) < 0.01) {
+          durationLabel.textContent = formatTime(durationSec);
+          return true;
+        }
+        durationSec = sec;
+        durationLabel.textContent = formatTime(sec);
+        updateProgress();
         return true;
       }
 
-      // Parse MP3 bytes directly so WeChat can show duration without tapping play.
+      function detectDurationFromAudio() {
+        var d = audio.duration;
+        if (isFinite(d) && d > 0) {
+          setDuration(d);
+          return;
+        }
+        // Some WebViews report Infinity until we force a seek.
+        if (d === Infinity) {
+          try {
+            var onTime = function () {
+              audio.removeEventListener("timeupdate", onTime);
+              if (isFinite(audio.duration) && audio.duration > 0) {
+                setDuration(audio.duration);
+              }
+              try { audio.currentTime = 0; } catch (e) {}
+            };
+            audio.addEventListener("timeupdate", onTime);
+            audio.currentTime = 1e101;
+          } catch (e) {}
+        }
+      }
+
+      function updateProgress() {
+        var current = audio.currentTime || 0;
+        var total = durationSec;
+        if ((!total || total <= 0) && isFinite(audio.duration) && audio.duration > 0) {
+          total = audio.duration;
+          setDuration(total);
+        }
+        if (!seeking) {
+          currentLabel.textContent = formatTime(current);
+          if (total > 0) {
+            seek.value = String(Math.min(1000, Math.round((current / total) * 1000)));
+          }
+        }
+      }
+
       function durationFromMp3(arrayBuffer) {
         var data = new Uint8Array(arrayBuffer);
         var offset = 0;
@@ -251,7 +388,9 @@
 
         var totalSamples = 0;
         var sampleRate = 0;
+        var firstBitrate = 0;
         var frames = 0;
+        var audioStart = offset;
         var guard = 0;
 
         while (offset < data.length - 4 && guard < 200000) {
@@ -276,10 +415,8 @@
 
           var col;
           if (versionBits === 3) {
-            // MPEG1: Layer1 / Layer2 / Layer3
             col = layerBits === 3 ? 0 : layerBits === 2 ? 1 : 2;
           } else {
-            // MPEG2 / MPEG2.5: Layer1|2 share one column, Layer3 another
             col = layerBits === 1 ? 4 : 3;
           }
 
@@ -288,6 +425,10 @@
           if (!bitrate || !sampleRate) {
             offset += 1;
             continue;
+          }
+          if (!firstBitrate) {
+            firstBitrate = bitrate;
+            audioStart = offset;
           }
 
           var samplesPerFrame = layerBits === 3 ? 384 : layerBits === 2 ? 1152 : versionBits === 3 ? 1152 : 576;
@@ -304,7 +445,6 @@
             continue;
           }
 
-          // Xing/Info VBR header on first audio frame.
           if (frames === 0) {
             var channelMode = (data[offset + 3] >> 6) & 0x3;
             var xingOffset =
@@ -335,33 +475,97 @@
           offset += frameLength;
         }
 
-        if (!frames || !sampleRate) return 0;
-        return totalSamples / sampleRate;
+        if (frames && sampleRate) return totalSamples / sampleRate;
+        // CBR fallback from file size.
+        if (firstBitrate > 0) {
+          return ((data.length - audioStart) * 8) / firstBitrate;
+        }
+        return 0;
       }
 
-      function attachAudio(arrayBuffer) {
-        var blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
-        var objectUrl = URL.createObjectURL(blob);
-        audio.src = objectUrl;
-        audio.load();
-      }
-
-      fetch("hello.mp3")
-        .then(function (res) {
-          if (!res.ok) throw new Error("fetch failed");
-          return res.arrayBuffer();
-        })
-        .then(function (buffer) {
-          var parsed = durationFromMp3(buffer);
-          if (!showDuration(parsed)) {
-            label.textContent = "未知";
-          }
-          attachAudio(buffer);
-        })
-        .catch(function () {
-          label.textContent = "未知";
-          audio.load();
+      function loadDurationByRequest() {
+        var url = new URL("hello.mp3", window.location.href).href;
+        if (window.fetch) {
+          return fetch(url, { credentials: "same-origin", cache: "force-cache" })
+            .then(function (res) {
+              if (!res.ok) throw new Error("fetch failed");
+              return res.arrayBuffer();
+            })
+            .then(function (buffer) {
+              setDuration(durationFromMp3(buffer));
+            });
+        }
+        return new Promise(function (resolve, reject) {
+          var xhr = new XMLHttpRequest();
+          xhr.open("GET", url, true);
+          xhr.responseType = "arraybuffer";
+          xhr.onload = function () {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              setDuration(durationFromMp3(xhr.response));
+              resolve();
+            } else {
+              reject(new Error("xhr failed"));
+            }
+          };
+          xhr.onerror = reject;
+          xhr.send();
         });
+      }
+
+      // Immediate fallback from file metadata written into the page.
+      setDuration(audio.getAttribute("data-duration"));
+
+      playBtn.addEventListener("click", function () {
+        if (audio.paused) {
+          audio.play().catch(function () {});
+        } else {
+          audio.pause();
+        }
+      });
+
+      audio.addEventListener("play", function () {
+        playBtn.classList.add("is-playing");
+        playBtn.setAttribute("aria-label", "暂停");
+        detectDurationFromAudio();
+      });
+      audio.addEventListener("pause", function () {
+        playBtn.classList.remove("is-playing");
+        playBtn.setAttribute("aria-label", "播放");
+      });
+      audio.addEventListener("ended", function () {
+        playBtn.classList.remove("is-playing");
+        playBtn.setAttribute("aria-label", "播放");
+        audio.currentTime = 0;
+        updateProgress();
+      });
+      audio.addEventListener("loadedmetadata", detectDurationFromAudio);
+      audio.addEventListener("durationchange", detectDurationFromAudio);
+      audio.addEventListener("canplay", detectDurationFromAudio);
+      audio.addEventListener("timeupdate", function () {
+        detectDurationFromAudio();
+        updateProgress();
+      });
+
+      seek.addEventListener("input", function () {
+        seeking = true;
+        var total = durationSec > 0 ? durationSec : audio.duration;
+        if (isFinite(total) && total > 0) {
+          currentLabel.textContent = formatTime((Number(seek.value) / 1000) * total);
+        }
+      });
+      seek.addEventListener("change", function () {
+        var total = durationSec > 0 ? durationSec : audio.duration;
+        if (isFinite(total) && total > 0) {
+          audio.currentTime = (Number(seek.value) / 1000) * total;
+        }
+        seeking = false;
+        updateProgress();
+      });
+
+      loadDurationByRequest().catch(function () {
+        detectDurationFromAudio();
+      });
+      audio.load();
     })();
   </script>
 </body>
