@@ -88,6 +88,15 @@
       text-align: center;
     }
 
+    .player-name {
+      color: var(--coral);
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      padding: 0 0.12em;
+      background: linear-gradient(180deg, transparent 62%, rgba(232, 107, 74, 0.22) 62%);
+      border-radius: 4px;
+    }
+
     .player-bar {
       display: flex;
       align-items: center;
@@ -243,7 +252,7 @@
     </div>
 
     <section class="player" aria-label="祝福音频">
-      <h1 class="player-title">来自洪梓昱的教师节祝福</h1>
+      <h1 class="player-title">来自<span class="player-name">洪梓昱</span>的教师节祝福</h1>
       <div class="player-bar">
         <button class="play-btn" id="play-btn" type="button" aria-label="播放">
           <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true">
