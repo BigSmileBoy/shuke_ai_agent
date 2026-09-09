@@ -286,7 +286,7 @@
         id="blessing-audio"
         playsinline
         preload="auto"
-        src="hello.mp3"
+        src="hello.mp3?v=10.15"
         data-duration="10.15"
       ></audio>
     </section>
@@ -496,24 +496,29 @@
       }
 
       function loadDurationByRequest() {
-        var url = new URL("hello.mp3", window.location.href).href;
+        // Keep in sync with <audio src> so duration parsing and playback use the same file.
+        var audioSrc = audio.getAttribute("src") || "hello.mp3";
+        var url = new URL(audioSrc, window.location.href).href;
         if (window.fetch) {
-          return fetch(url, { credentials: "same-origin", cache: "force-cache" })
+          return fetch(url, { credentials: "same-origin", cache: "no-cache" })
             .then(function (res) {
               if (!res.ok) throw new Error("fetch failed");
               return res.arrayBuffer();
             })
             .then(function (buffer) {
-              setDuration(durationFromMp3(buffer));
+              var parsed = durationFromMp3(buffer);
+              if (parsed > 0) setDuration(parsed);
             });
         }
         return new Promise(function (resolve, reject) {
           var xhr = new XMLHttpRequest();
           xhr.open("GET", url, true);
           xhr.responseType = "arraybuffer";
+          xhr.setRequestHeader("Cache-Control", "no-cache");
           xhr.onload = function () {
             if (xhr.status >= 200 && xhr.status < 300) {
-              setDuration(durationFromMp3(xhr.response));
+              var parsed = durationFromMp3(xhr.response);
+              if (parsed > 0) setDuration(parsed);
               resolve();
             } else {
               reject(new Error("xhr failed"));
